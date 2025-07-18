@@ -1,30 +1,67 @@
-// A simple Express.js server for your backend.
-// This file is located at /server/index.js
-
+// server/index.js
 const express = require('express');
 const cors = require('cors');
+require('dotenv').config();
+const http = require('http');
+const { Server } = require("socket.io");
 
-// Initialize the Express application
+const pool = require('./db');
+const authRoutes = require('./routes/auth');
+const shipmentRoutes = require('./routes/shipments');
+const userRoutes = require('./routes/users');
+const rateRoutes = require('./routes/rates');
+const branchRoutes = require('./routes/branches');
+const reportRoutes = require('./routes/reports');
+const updateRoutes = require('./routes/updates'); // <-- 1. IMPORT the new updates routes
+
 const app = express();
-const PORT = process.env.PORT || 3001; // Use port 3001 for the server
+const server = http.createServer(app);
 
-// Middleware
-// Enable Cross-Origin Resource Sharing (CORS) so your React app can make requests to this server
-app.use(cors()); 
-// Enable Express to parse JSON in the request body
-app.use(express.json()); 
-
-// --- API Routes ---
-
-// A simple example API route to confirm the server is working.
-// This will be accessible at http://localhost:3001/api/message
-app.get('/api/message', (req, res) => {
-  res.json({ message: "Hello from the Node.js server!" });
+const io = new Server(server, {
+  cors: {
+    origin: "http://localhost:3000",
+    methods: ["GET", "POST"]
+  }
 });
 
-// --- Start the Server ---
+const PORT = process.env.PORT || 5000;
 
-// Listen for incoming requests on the specified port
-app.listen(PORT, () => {
-  console.log(`🚀 Server is running on http://localhost:${PORT}`);
+app.use(cors()); 
+app.use(express.json()); 
+
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
+// --- API Routes ---
+app.use('/api/auth', authRoutes);
+app.use('/api/shipments', shipmentRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/rates', rateRoutes);
+app.use('/api/branches', branchRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/updates', updateRoutes); // <-- 2. USE the new updates routes
+
+// ... (Socket.IO and server listen logic remains the same)
+io.on('connection', (socket) => {
+  console.log(`User connected: ${socket.id}`);
+  socket.on('joinRoom', (trackingNumber) => {
+    socket.join(trackingNumber);
+    console.log(`User ${socket.id} joined room for tracking# ${trackingNumber}`);
+  });
+  socket.on('disconnect', () => {
+    console.log(`User disconnected: ${socket.id}`);
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+  pool.query('SELECT NOW()', (err, res) => {
+    if (err) {
+      console.error('Error connecting to the database:', err);
+    } else {
+      console.log('Successfully connected to PostgreSQL database.');
+    }
+  });
 });
