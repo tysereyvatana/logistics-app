@@ -1,6 +1,6 @@
 // -------------------------------------------------------------------
 // FILE: routes/rates.js
-// DESCRIPTION: API routes for CRUD operations on service_rates.
+// DESCRIPTION: API routes for CRUD operations on service_rates with real-time updates.
 // -------------------------------------------------------------------
 const express = require('express');
 const router = express.Router();
@@ -9,7 +9,7 @@ const { protect, authorize } = require('../middleware/authMiddleware');
 
 // @route   GET /api/rates
 // @desc    Get all service rates
-// @access  Private (Admin, Staff) - Staff need this for dropdowns
+// @access  Private (Admin, Staff)
 router.get('/', protect, authorize('admin', 'staff'), async (req, res) => {
     try {
         const rates = await pool.query('SELECT * FROM service_rates ORDER BY base_rate');
@@ -33,6 +33,10 @@ router.post('/', protect, authorize('admin'), async (req, res) => {
             'INSERT INTO service_rates (service_name, base_rate) VALUES ($1, $2) RETURNING *',
             [service_name, base_rate]
         );
+        
+        // --- REAL-TIME UPDATE ---
+        req.io.to('rates_room').emit('rates_updated');
+
         res.status(201).json(newRate.rows[0]);
     } catch (err) {
         console.error(err.message);
@@ -57,6 +61,10 @@ router.put('/:id', protect, authorize('admin'), async (req, res) => {
         if (updatedRate.rows.length === 0) {
             return res.status(404).json({ msg: 'Rate not found.' });
         }
+
+        // --- REAL-TIME UPDATE ---
+        req.io.to('rates_room').emit('rates_updated');
+
         res.json(updatedRate.rows[0]);
     } catch (err) {
         console.error(err.message);
@@ -74,6 +82,10 @@ router.delete('/:id', protect, authorize('admin'), async (req, res) => {
         if (deleteOp.rowCount === 0) {
             return res.status(404).json({ msg: 'Rate not found.' });
         }
+
+        // --- REAL-TIME UPDATE ---
+        req.io.to('rates_room').emit('rates_updated');
+
         res.json({ msg: 'Service rate removed.' });
     } catch (err) {
         console.error(err.message);

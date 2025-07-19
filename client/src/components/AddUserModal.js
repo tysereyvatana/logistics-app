@@ -7,12 +7,25 @@ const AddUserModal = ({ isOpen, onClose, onUserAdded }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('client');
-  const [branchId, setBranchId] = useState(''); // New state for selected branch
-  const [branches, setBranches] = useState([]); // State to store branches
+  const [branchId, setBranchId] = useState('');
+  const [branches, setBranches] = useState([]);
   const [error, setError] = useState('');
 
+  // Effect to reset the form whenever the modal is opened
   useEffect(() => {
-    // Fetch branches if the modal is open and the role is staff or admin
+    if (isOpen) {
+        setFullName('');
+        setEmail('');
+        setPassword('');
+        setRole('client');
+        setBranchId('');
+        setBranches([]); // Clear previous branches
+        setError('');
+    }
+  }, [isOpen]);
+
+  // Effect to fetch branches only when the role is changed to staff or admin
+  useEffect(() => {
     if (isOpen && (role === 'staff' || role === 'admin')) {
       const fetchBranches = async () => {
         try {
@@ -20,20 +33,16 @@ const AddUserModal = ({ isOpen, onClose, onUserAdded }) => {
           setBranches(response.data);
         } catch (err) {
           console.error("Failed to fetch branches", err);
+          setError("Could not load the branch list.");
         }
       };
       fetchBranches();
+    } else {
+      // If role is client, clear the branches
+      setBranches([]);
+      setBranchId('');
     }
-    // Reset form when modal opens
-    if (isOpen) {
-        setFullName('');
-        setEmail('');
-        setPassword('');
-        setRole('client');
-        setBranchId('');
-        setError('');
-    }
-  }, [isOpen, role]);
+  }, [role, isOpen]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -41,12 +50,16 @@ const AddUserModal = ({ isOpen, onClose, onUserAdded }) => {
       setError('All fields are required.');
       return;
     }
+    if ((role === 'staff' || role === 'admin') && !branchId) {
+        setError('Please assign a branch for this role.');
+        return;
+    }
     setError('');
 
     const newUser = { fullName, email, password, role, branch_id: branchId };
     try {
       await api.post('/api/auth/register', newUser);
-      onUserAdded();
+      onUserAdded(); // This will trigger the real-time update
       onClose();
     } catch (err) {
       setError(err.response?.data?.msg || 'Failed to create user.');

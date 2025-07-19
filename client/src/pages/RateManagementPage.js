@@ -1,21 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../services/api';
 import ConfirmationModal from '../components/ConfirmationModal';
-import RateModal from '../components/RateModal'; // We will create this next
+import RateModal from '../components/RateModal';
+import { io } from 'socket.io-client';
 
 const RateManagementPage = () => {
   const [rates, setRates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // State for modals
   const [isRateModalOpen, setIsRateModalOpen] = useState(false);
   const [rateToEdit, setRateToEdit] = useState(null);
   const [rateToDelete, setRateToDelete] = useState(null);
+  const socketRef = useRef(null);
 
-  const fetchRates = async () => {
+  const fetchRates = useCallback(async () => {
     try {
-      setLoading(true);
       const response = await api.get('/api/rates');
       setRates(response.data);
     } catch (err) {
@@ -24,22 +24,39 @@ const RateManagementPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchRates();
-  }, []);
+
+    socketRef.current = io('http://localhost:5000');
+    const socket = socketRef.current;
+
+    socket.on('connect', () => {
+      console.log('[RateManagementPage] Socket connected, joining rates_room...');
+      socket.emit('join_rates_room');
+    });
+
+    const handleUpdate = () => {
+      console.log('[RateManagementPage] Received rates_updated event. Refetching data...');
+      fetchRates();
+    };
+
+    socket.on('rates_updated', handleUpdate);
+
+    return () => {
+      console.log('[RateManagementPage] Disconnecting socket.');
+      socket.off('rates_updated', handleUpdate);
+      socket.disconnect();
+    };
+  }, [fetchRates]);
 
   const handleSaveRate = async (rateData) => {
     try {
       if (rateToEdit) {
-        // Update existing rate
-        const response = await api.put(`/api/rates/${rateToEdit.id}`, rateData);
-        setRates(rates.map(r => r.id === rateToEdit.id ? response.data : r));
+        await api.put(`/api/rates/${rateToEdit.id}`, rateData);
       } else {
-        // Create new rate
-        const response = await api.post('/api/rates', rateData);
-        setRates([...rates, response.data]);
+        await api.post('/api/rates', rateData);
       }
       closeModal();
     } catch (err) {
@@ -52,7 +69,6 @@ const RateManagementPage = () => {
     if (!rateToDelete) return;
     try {
       await api.delete(`/api/rates/${rateToDelete.id}`);
-      setRates(rates.filter(r => r.id !== rateToDelete.id));
       setRateToDelete(null);
     } catch (err) {
       alert('Failed to delete rate.');

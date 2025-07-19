@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useParams } from 'react-router-dom'; // 1. Import useParams
 import api from '../services/api';
 import { io } from 'socket.io-client';
 
@@ -9,13 +10,44 @@ const TrackingPage = () => {
   const [error, setError] = useState('');
   
   const socketRef = useRef(null);
+  const { trackingNumber: urlTrackingNumber } = useParams(); // 2. Get tracking number from URL
 
+  // 3. Refactor the fetching logic into a useCallback hook for stability
+  const fetchShipmentData = useCallback(async (numToTrack) => {
+    if (!numToTrack) {
+      setError('Please enter a tracking number.');
+      return;
+    }
+    setLoading(true);
+    setResult(null);
+    setError('');
+
+    try {
+      const response = await api.get(`/api/shipments/track/${numToTrack}`);
+      setResult(response.data);
+      
+      if (socketRef.current) {
+        socketRef.current.emit('joinRoom', numToTrack);
+      }
+
+    } catch (err) {
+      if (err.response && err.response.status === 404) {
+        setError('No shipment found with that tracking number.');
+      } else {
+        setError('An error occurred. Please try again.');
+      }
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, []); // Empty dependency array means this function is created only once
+
+  // Effect for handling WebSocket connection
   useEffect(() => {
     socketRef.current = io('http://localhost:5000');
     socketRef.current.on('shipmentUpdated', (updatedData) => {
       setResult((currentResult) => {
         if (currentResult && updatedData.shipment.tracking_number === currentResult.shipment.tracking_number) {
-          console.log("Real-time update received!", updatedData);
           return updatedData;
         }
         return currentResult;
@@ -29,34 +61,18 @@ const TrackingPage = () => {
     };
   }, []);
 
-  const handleTrack = async (e) => {
+  // 4. New effect to handle tracking number from the URL
+  useEffect(() => {
+    if (urlTrackingNumber) {
+      setTrackingNumber(urlTrackingNumber); // Set the input field value
+      fetchShipmentData(urlTrackingNumber); // Automatically fetch data
+    }
+  }, [urlTrackingNumber, fetchShipmentData]);
+
+  // Handle form submission
+  const handleTrack = (e) => {
     e.preventDefault();
-    if (!trackingNumber) {
-      setError('Please enter a tracking number.');
-      return;
-    }
-    setLoading(true);
-    setResult(null);
-    setError('');
-
-    try {
-      const response = await api.get(`/api/shipments/track/${trackingNumber}`);
-      setResult(response.data);
-      
-      if (socketRef.current) {
-        socketRef.current.emit('joinRoom', trackingNumber);
-      }
-
-    } catch (err) {
-      if (err.response && err.response.status === 404) {
-        setError('No shipment found with that tracking number.');
-      } else {
-        setError('An error occurred. Please try again.');
-      }
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    fetchShipmentData(trackingNumber);
   };
 
   return (
@@ -91,13 +107,12 @@ const TrackingPage = () => {
                 <p className="text-sm text-gray-500">Status</p>
                 <p className="font-bold text-lg text-blue-600">{result.shipment.status.replace('_', ' ').toUpperCase()}</p>
             </div>
-            {/* --- UPDATED SECTION --- */}
             <div className="p-4 bg-gray-50 rounded-lg">
-                <p className="text-sm text-gray-500">Destination From</p>
+                <p className="text-sm text-gray-500">Origin</p>
                 <p className="font-semibold text-gray-700">{result.shipment.origin_branch_name}</p>
             </div>
             <div className="p-4 bg-gray-50 rounded-lg">
-                <p className="text-sm text-gray-500">Destination To</p>
+                <p className="text-sm text-gray-500">Destination</p>
                 <p className="font-semibold text-gray-700">{result.shipment.destination_branch_name}</p>
             </div>
           </div>

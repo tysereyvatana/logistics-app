@@ -1,6 +1,6 @@
 // -------------------------------------------------------------------
 // FILE: routes/branches.js
-// DESCRIPTION: API routes for CRUD operations on company branches.
+// DESCRIPTION: API routes for CRUD operations on company branches with real-time updates.
 // -------------------------------------------------------------------
 const express = require('express');
 const router = express.Router();
@@ -33,6 +33,10 @@ router.post('/', protect, authorize('admin'), async (req, res) => {
             'INSERT INTO branches (branch_name, branch_address, branch_phone) VALUES ($1, $2, $3) RETURNING *',
             [branch_name, branch_address, branch_phone]
         );
+
+        // --- REAL-TIME UPDATE ---
+        req.io.to('branches_room').emit('branches_updated');
+
         res.status(201).json(newBranch.rows[0]);
     } catch (err) {
         console.error(err.message);
@@ -57,6 +61,10 @@ router.put('/:id', protect, authorize('admin'), async (req, res) => {
         if (updatedBranch.rows.length === 0) {
             return res.status(404).json({ msg: 'Branch not found.' });
         }
+
+        // --- REAL-TIME UPDATE ---
+        req.io.to('branches_room').emit('branches_updated');
+
         res.json(updatedBranch.rows[0]);
     } catch (err) {
         console.error(err.message);
@@ -74,6 +82,10 @@ router.delete('/:id', protect, authorize('admin'), async (req, res) => {
         if (deleteOp.rowCount === 0) {
             return res.status(404).json({ msg: 'Branch not found.' });
         }
+
+        // --- REAL-TIME UPDATE ---
+        req.io.to('branches_room').emit('branches_updated');
+
         res.json({ msg: 'Branch removed.' });
     } catch (err) {
         console.error(err.message);

@@ -1,15 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useContext } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../services/api';
 import { QRCodeSVG } from 'qrcode.react';
 import { useReactToPrint } from 'react-to-print';
+import AuthContext from '../context/AuthContext';
 
 const InvoicePage = () => {
-  const { id } = useParams(); // Get the shipment ID from the URL
+  const { id } = useParams();
   const [shipment, setShipment] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const invoiceRef = useRef();
+  const { user } = useContext(AuthContext);
 
   const handlePrint = useReactToPrint({
     content: () => invoiceRef.current,
@@ -32,6 +34,13 @@ const InvoicePage = () => {
     fetchShipment();
   }, [id]);
 
+  const getBackLink = () => {
+    if (user && (user.role === 'admin' || user.role === 'staff')) {
+      return '/shipments';
+    }
+    return '/my-shipments';
+  };
+
   if (loading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500"></div></div>;
   if (error) return <div className="text-center mt-10 p-4 bg-red-100 text-red-700 rounded-lg">{error}</div>;
   if (!shipment) return <div className="text-center mt-10">Shipment not found.</div>;
@@ -40,15 +49,15 @@ const InvoicePage = () => {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
-        <Link to="/shipments" className="text-blue-600 hover:underline">&larr; Back to Shipments</Link>
+      <div className="flex justify-between items-center mb-6 max-w-2xl mx-auto">
+        <Link to={getBackLink()} className="text-blue-600 hover:underline">&larr; Back to Shipments</Link>
         <button onClick={handlePrint} className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm7-8a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
           Print Invoice
         </button>
       </div>
 
-      <div ref={invoiceRef} className="bg-white rounded-xl shadow-lg p-8 max-w-4xl mx-auto">
+      <div ref={invoiceRef} className="bg-white rounded-xl shadow-lg p-8 max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex justify-between items-start border-b pb-4">
           <div>

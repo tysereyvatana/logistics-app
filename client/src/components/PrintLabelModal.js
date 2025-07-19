@@ -1,46 +1,46 @@
 import React, { useRef } from 'react';
 import Modal from './Modal';
-import { QRCodeSVG } from 'qrcode.react'; // The fix is here: using a named import
+import { QRCodeSVG } from 'qrcode.react';
 import { useReactToPrint } from 'react-to-print';
 
 const PrintLabelModal = ({ isOpen, onClose, shipment }) => {
   const labelRef = useRef();
 
-  // This hook handles the print functionality
   const handlePrint = useReactToPrint({
     content: () => labelRef.current,
   });
 
   if (!shipment) return null;
 
-  // Construct the tracking URL for the QR code
   const trackingUrl = `${window.location.origin}/track/${shipment.tracking_number}`;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Print Shipping Label">
+    <Modal isOpen={isOpen} onClose={onClose} title="Print Shipping Label" size="md">
       {/* This is the printable area */}
       <div ref={labelRef} className="p-4 border rounded-lg">
         <div className="text-center mb-4">
           <h2 className="text-xl font-bold">LogistiCo.</h2>
           <p className="text-sm">Shipping Label</p>
         </div>
-        <div className="grid grid-cols-2 gap-4 border-t border-b py-4">
+        {/* --- LAYOUT UPDATED HERE --- */}
+        <div className="space-y-4 border-t border-b py-4">
           <div>
-            <p className="text-xs font-bold uppercase">From:</p>
-            <p>{shipment.sender_name}</p>
-            <p>{shipment.origin_address}</p>
+            <p className="text-xs font-bold uppercase text-gray-500">Sender (From) :</p>
+            <p className="font-semibold">{shipment.sender_name}</p>
+            <p>{shipment.origin_branch_name}</p>
+            <p>{shipment.origin_branch_address}</p>
             <p>Phone: {shipment.sender_phone}</p>
           </div>
           <div>
-            <p className="text-xs font-bold uppercase">To:</p>
-            <p>{shipment.receiver_name}</p>
-            <p>{shipment.destination_address}</p>
+            <p className="text-xs font-bold uppercase text-gray-500">Receiver (To):</p>
+            <p className="font-semibold">{shipment.receiver_name}</p>
+            <p>{shipment.destination_branch_name}</p>
+            <p>{shipment.destination_branch_address}</p>
             <p>Phone: {shipment.receiver_phone}</p>
           </div>
         </div>
         <div className="flex items-center justify-between mt-4">
           <div className="text-center">
-            {/* Use the correctly imported component */}
             <QRCodeSVG value={trackingUrl} size={100} />
             <p className="text-xs font-mono mt-1">{shipment.tracking_number}</p>
           </div>

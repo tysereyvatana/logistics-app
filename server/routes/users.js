@@ -1,6 +1,6 @@
 // -------------------------------------------------------------------
 // FILE: routes/users.js
-// DESCRIPTION: Added full error logging to debug the user list endpoint.
+// DESCRIPTION: Added real-time events for user updates and deletions.
 // -------------------------------------------------------------------
 const express = require('express');
 const router = express.Router();
@@ -22,8 +22,6 @@ router.get('/', protect, authorize('admin'), async (req, res) => {
         const allUsers = await pool.query(query);
         res.json(allUsers.rows);
     } catch (err) {
-        // --- NEW: Full Error Logging ---
-        // This will print the complete database error to the server terminal.
         console.error("!!! DATABASE ERROR fetching users:", err); 
         res.status(500).send('Server Error');
     }
@@ -66,6 +64,12 @@ router.put('/:id/role', protect, authorize('admin'), async (req, res) => {
         if (updatedUser.rows.length === 0) {
             return res.status(404).json({ msg: 'User not found' });
         }
+
+        // --- REAL-TIME UPDATE ---
+        if (req.io) {
+            req.io.to('users_room').emit('users_updated');
+        }
+
         res.json(updatedUser.rows[0]);
 
     } catch (err) {
@@ -86,6 +90,12 @@ router.delete('/:id', protect, authorize('admin'), async (req, res) => {
         if (deleteOp.rowCount === 0) {
             return res.status(404).json({ msg: 'User not found' });
         }
+
+        // --- REAL-TIME UPDATE ---
+        if (req.io) {
+            req.io.to('users_room').emit('users_updated');
+        }
+
         res.json({ msg: 'User removed successfully' });
     } catch (err) {
         console.error(err.message);

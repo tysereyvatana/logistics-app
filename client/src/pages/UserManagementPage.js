@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import api from '../services/api';
 import AuthContext from '../context/AuthContext';
 import ConfirmationModal from '../components/ConfirmationModal';
 import EditUserRoleModal from '../components/EditUserRoleModal';
 import AddUserModal from '../components/AddUserModal';
+import { io } from 'socket.io-client';
 
 const UserManagementPage = () => {
   const [users, setUsers] = useState([]);
@@ -14,10 +15,11 @@ const UserManagementPage = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [userToEdit, setUserToEdit] = useState(null);
   const [userToDelete, setUserToDelete] = useState(null);
+  
+  const socketRef = useRef(null);
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
-      setLoading(true);
       const response = await api.get('/api/users');
       setUsers(response.data);
     } catch (err) {
@@ -26,21 +28,36 @@ const UserManagementPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchUsers();
-  }, []);
+
+    socketRef.current = io('http://localhost:5000');
+    const socket = socketRef.current;
+
+    socket.on('connect', () => {
+      console.log('[UserManagementPage] Socket connected, joining users_room...');
+      socket.emit('join_users_room');
+    });
+
+    const handleUpdate = () => {
+      console.log('[UserManagementPage] Received users_updated event. Refetching data...');
+      fetchUsers();
+    };
+
+    socket.on('users_updated', handleUpdate);
+
+    return () => {
+      console.log('[UserManagementPage] Disconnecting socket.');
+      socket.off('users_updated', handleUpdate);
+      socket.disconnect();
+    };
+  }, [fetchUsers]);
 
   const handleUpdateUserRole = async (userId, data) => {
     try {
-      // --- DEBUG LOG ---
-      console.log(`[Frontend] Sending update for user ${userId} with data:`, data);
-      
       await api.put(`/api/users/${userId}/role`, data);
-      
-      console.log('[Frontend] Update successful, refetching user list.');
-      fetchUsers();
       setUserToEdit(null);
     } catch (err) {
       alert(err.response?.data?.msg || 'Failed to update user role.');
@@ -52,7 +69,6 @@ const UserManagementPage = () => {
     if (!userToDelete) return;
     try {
       await api.delete(`/api/users/${userToDelete.id}`);
-      setUsers(users.filter(u => u.id !== userToDelete.id));
       setUserToDelete(null);
     } catch (err) {
       alert(err.response?.data?.msg || 'Failed to delete user.');
@@ -78,7 +94,7 @@ const UserManagementPage = () => {
       <AddUserModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        onUserAdded={fetchUsers}
+        onUserAdded={() => setIsAddModalOpen(false)} // Just close the modal, websocket will refresh
       />
       <EditUserRoleModal
         isOpen={!!userToEdit}

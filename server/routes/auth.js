@@ -1,6 +1,6 @@
 // -------------------------------------------------------------------
 // FILE: routes/auth.js
-// DESCRIPTION: Final version for "last login wins" session model.
+// DESCRIPTION: Added real-time event for user registration.
 // -------------------------------------------------------------------
 const express = require('express');
 const router = express.Router();
@@ -27,15 +27,22 @@ router.post('/login', async (req, res) => {
             return res.status(400).json({ msg: 'Invalid credentials' });
         }
 
-        // Generate a new unique session ID. This will overwrite any existing session.
-        const sessionId = randomUUID();
-        await pool.query('UPDATE users SET active_session_id = $1 WHERE id = $2', [sessionId, user.id]);
+        const oldSessionId = user.active_session_id;
+        const newSessionId = randomUUID();
+
+        if (oldSessionId && req.io) {
+            req.io.to(`session_${oldSessionId}`).emit('force_logout', {
+                msg: 'This account has been logged in from another device. This session has been terminated.'
+            });
+        }
+
+        await pool.query('UPDATE users SET active_session_id = $1 WHERE id = $2', [newSessionId, user.id]);
 
         const payload = {
             user: {
                 id: user.id,
                 role: user.role,
-                sessionId: sessionId // Include the new session ID in the token
+                sessionId: newSessionId
             }
         };
 
@@ -66,12 +73,11 @@ router.post('/login', async (req, res) => {
 router.post('/logout', protect, async (req, res) => {
     try {
         const userId = req.user.id;
-        // Clear the session ID, logging the user out from all devices.
         await pool.query('UPDATE users SET active_session_id = NULL WHERE id = $1', [userId]);
         res.status(200).json({ msg: 'Logged out successfully' });
     } catch (err) {
         console.error(err.message);
-        res.status(500).send('Server Error');
+        res.status(500).send('Server error');
     }
 });
 
@@ -93,11 +99,18 @@ router.post('/register', async (req, res) => {
       'INSERT INTO users (full_name, email, password_hash, role, branch_id) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, role',
       [fullName, email, passwordHash, role, finalBranchId]
     );
+
+    // --- REAL-TIME UPDATE ---
+    if (req.io) {
+        req.io.to('users_room').emit('users_updated');
+    }
+
     res.status(201).json({ msg: 'User registered successfully!', user: newUser.rows[0] });
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server error');
   }
 });
+
 
 module.exports = router;

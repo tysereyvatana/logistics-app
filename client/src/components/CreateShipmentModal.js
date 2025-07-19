@@ -9,7 +9,7 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
     destination_branch_id: '',
     estimated_delivery: '',
     weight_kg: '',
-    service_type: 'standard',
+    service_type: '',
     sender_name: '',
     sender_phone: '',
     receiver_name: '',
@@ -17,20 +17,39 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
     is_cod: false,
     cod_amount: ''
   });
+
+  // State for the raw data lists
   const [clients, setClients] = useState([]);
   const [branches, setBranches] = useState([]);
+  const [rates, setRates] = useState([]);
   const [error, setError] = useState('');
+
+  // State for the searchable input fields
+  const [clientSearch, setClientSearch] = useState('');
+  const [originSearch, setOriginSearch] = useState('');
+  const [destinationSearch, setDestinationSearch] = useState('');
+
+  // State to control visibility of the suggestion dropdowns
+  const [showClientSuggestions, setShowClientSuggestions] = useState(false);
+  const [showOriginSuggestions, setShowOriginSuggestions] = useState(false);
+  const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       const fetchData = async () => {
         try {
-          const [clientsResponse, branchesResponse] = await Promise.all([
+          const [clientsResponse, branchesResponse, ratesResponse] = await Promise.all([
             api.get('/api/users/clients'),
-            api.get('/api/branches')
+            api.get('/api/branches'),
+            api.get('/api/rates')
           ]);
           setClients(clientsResponse.data);
           setBranches(branchesResponse.data);
+          setRates(ratesResponse.data);
+
+          if (ratesResponse.data.length > 0) {
+            setFormData(prev => ({ ...prev, service_type: ratesResponse.data[0].service_name }));
+          }
         } catch (err) {
           console.error("Failed to fetch data", err);
           setError("Could not load required data.");
@@ -39,40 +58,21 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
       fetchData();
       // Reset form on open
       setFormData({
-        clientId: '',
-        origin_branch_id: '',
-        destination_branch_id: '',
-        estimated_delivery: '',
-        weight_kg: '',
-        service_type: 'standard',
-        sender_name: '',
-        sender_phone: '',
-        receiver_name: '',
-        receiver_phone: '',
-        is_cod: false,
-        cod_amount: ''
+        clientId: '', origin_branch_id: '', destination_branch_id: '',
+        estimated_delivery: '', weight_kg: '', service_type: '',
+        sender_name: '', sender_phone: '', receiver_name: '', receiver_phone: '',
+        is_cod: false, cod_amount: ''
       });
+      setClientSearch('');
+      setOriginSearch('');
+      setDestinationSearch('');
       setError('');
     }
   }, [isOpen]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    const val = type === 'checkbox' ? checked : value;
-
-    if (name === 'clientId') {
-        const selectedClient = clients.find(client => client.id === value);
-        if (selectedClient) {
-            setFormData(prev => ({
-                ...prev,
-                [name]: value,
-                sender_name: selectedClient.full_name
-            }));
-            return;
-        }
-    }
-
-    setFormData(prev => ({ ...prev, [name]: val }));
+    setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
   };
 
   const handleSubmit = (e) => {
@@ -86,6 +86,15 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
     onShipmentCreated(newShipmentData);
   };
 
+  // Filter functions for the searchable inputs
+  const filteredClients = clientSearch
+    ? clients.filter(c => c.full_name.toLowerCase().includes(clientSearch.toLowerCase()))
+    : clients;
+
+  const filteredBranches = (searchInput) => searchInput
+    ? branches.filter(b => b.branch_name.toLowerCase().includes(searchInput.toLowerCase()))
+    : branches;
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Create New Shipment">
       <form onSubmit={handleSubmit}>
@@ -97,26 +106,86 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
             <fieldset>
               <legend className="text-lg font-medium text-gray-900 mb-2">Client & Route</legend>
               <div className="space-y-4">
-                <div>
+                {/* Searchable Client Dropdown */}
+                <div className="relative">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Assign to Client</label>
-                  <select name="clientId" value={formData.clientId} onChange={handleChange} className="w-full px-3 py-2 border rounded-lg bg-white" required>
-                    <option value="" disabled>-- Select a Client --</option>
-                    {clients.map(client => (<option key={client.id} value={client.id}>{client.full_name}</option>))}
-                  </select>
+                  <input
+                    type="text"
+                    value={clientSearch}
+                    onChange={(e) => { setClientSearch(e.target.value); setShowClientSuggestions(true); }}
+                    onFocus={() => setShowClientSuggestions(true)}
+                    onBlur={() => setTimeout(() => setShowClientSuggestions(false), 150)}
+                    placeholder="Search for a client..."
+                    className="w-full px-3 py-2 border rounded-lg bg-white"
+                    required
+                  />
+                  {showClientSuggestions && (
+                    <ul className="absolute z-20 w-full bg-white border rounded-lg mt-1 max-h-40 overflow-y-auto shadow-lg">
+                      {filteredClients.map(client => (
+                        <li key={client.id} onMouseDown={() => {
+                          setClientSearch(client.full_name);
+                          setFormData(prev => ({ ...prev, clientId: client.id, sender_name: client.full_name }));
+                          setShowClientSuggestions(false);
+                        }} className="px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                          {client.full_name}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
-                <div>
+                {/* Searchable Origin Branch Dropdown */}
+                <div className="relative">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Origin Branch</label>
-                  <select name="origin_branch_id" value={formData.origin_branch_id} onChange={handleChange} className="w-full px-3 py-2 border rounded-lg bg-white" required>
-                    <option value="" disabled>-- Select Origin --</option>
-                    {branches.map(branch => (<option key={branch.id} value={branch.id}>{branch.branch_name}</option>))}
-                  </select>
+                  <input
+                    type="text"
+                    value={originSearch}
+                    onChange={(e) => { setOriginSearch(e.target.value); setShowOriginSuggestions(true); }}
+                    onFocus={() => setShowOriginSuggestions(true)}
+                    onBlur={() => setTimeout(() => setShowOriginSuggestions(false), 150)}
+                    placeholder="Search for an origin branch..."
+                    className="w-full px-3 py-2 border rounded-lg bg-white"
+                    required
+                  />
+                  {showOriginSuggestions && (
+                    <ul className="absolute z-10 w-full bg-white border rounded-lg mt-1 max-h-40 overflow-y-auto shadow-lg">
+                      {filteredBranches(originSearch).map(branch => (
+                        <li key={branch.id} onMouseDown={() => {
+                          setOriginSearch(branch.branch_name);
+                          setFormData(prev => ({ ...prev, origin_branch_id: branch.id }));
+                          setShowOriginSuggestions(false);
+                        }} className="px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                          {branch.branch_name}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
-                <div>
+                {/* Searchable Destination Branch Dropdown */}
+                <div className="relative">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Destination Branch</label>
-                  <select name="destination_branch_id" value={formData.destination_branch_id} onChange={handleChange} className="w-full px-3 py-2 border rounded-lg bg-white" required>
-                    <option value="" disabled>-- Select Destination --</option>
-                    {branches.map(branch => (<option key={branch.id} value={branch.id}>{branch.branch_name}</option>))}
-                  </select>
+                  <input
+                    type="text"
+                    value={destinationSearch}
+                    onChange={(e) => { setDestinationSearch(e.target.value); setShowDestinationSuggestions(true); }}
+                    onFocus={() => setShowDestinationSuggestions(true)}
+                    onBlur={() => setTimeout(() => setShowDestinationSuggestions(false), 150)}
+                    placeholder="Search for a destination branch..."
+                    className="w-full px-3 py-2 border rounded-lg bg-white"
+                    required
+                  />
+                  {showDestinationSuggestions && (
+                     <ul className="absolute z-10 w-full bg-white border rounded-lg mt-1 max-h-40 overflow-y-auto shadow-lg">
+                      {filteredBranches(destinationSearch).map(branch => (
+                        <li key={branch.id} onMouseDown={() => {
+                          setDestinationSearch(branch.branch_name);
+                          setFormData(prev => ({ ...prev, destination_branch_id: branch.id }));
+                          setShowDestinationSuggestions(false);
+                        }} className="px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                          {branch.branch_name}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </div>
             </fieldset>
@@ -159,9 +228,11 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Service</label>
                   <select name="service_type" value={formData.service_type} onChange={handleChange} className="w-full px-3 py-2 border rounded-lg bg-white">
-                    <option value="standard">Standard</option>
-                    <option value="express">Express</option>
-                    <option value="overnight">Overnight</option>
+                    {rates.map(rate => (
+                      <option key={rate.id} value={rate.service_name}>
+                        {rate.service_name.charAt(0).toUpperCase() + rate.service_name.slice(1)}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>

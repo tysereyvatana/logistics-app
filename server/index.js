@@ -12,7 +12,7 @@ const userRoutes = require('./routes/users');
 const rateRoutes = require('./routes/rates');
 const branchRoutes = require('./routes/branches');
 const reportRoutes = require('./routes/reports');
-const updateRoutes = require('./routes/updates'); // <-- 1. IMPORT the new updates routes
+const updateRoutes = require('./routes/updates');
 
 const app = express();
 const server = http.createServer(app);
@@ -41,15 +41,49 @@ app.use('/api/users', userRoutes);
 app.use('/api/rates', rateRoutes);
 app.use('/api/branches', branchRoutes);
 app.use('/api/reports', reportRoutes);
-app.use('/api/updates', updateRoutes); // <-- 2. USE the new updates routes
+app.use('/api/updates', updateRoutes);
 
-// ... (Socket.IO and server listen logic remains the same)
+// --- Socket.IO Connection Handling ---
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
+
   socket.on('joinRoom', (trackingNumber) => {
     socket.join(trackingNumber);
     console.log(`User ${socket.id} joined room for tracking# ${trackingNumber}`);
   });
+
+  socket.on('join_shipments_room', () => {
+    socket.join('shipments_room');
+    console.log(`User ${socket.id} joined the main shipments room.`);
+  });
+
+  socket.on('join_users_room', () => {
+    socket.join('users_room');
+    console.log(`User ${socket.id} joined the users management room.`);
+  });
+
+  socket.on('join_rates_room', () => {
+    socket.join('rates_room');
+    console.log(`User ${socket.id} joined the rates management room.`);
+  });
+
+  // --- NEW: For real-time updates on the BranchManagementPage ---
+  socket.on('join_branches_room', () => {
+    socket.join('branches_room');
+    console.log(`User ${socket.id} joined the branches management room.`);
+  });
+
+  socket.on('join_client_room', (userId) => {
+    const roomName = `client_${userId}`;
+    socket.join(roomName);
+    console.log(`User ${socket.id} joined client room: ${roomName}`);
+  });
+
+  socket.on('join_session_room', (sessionRoom) => {
+    socket.join(sessionRoom);
+    console.log(`User ${socket.id} joined session room: ${sessionRoom}`);
+  });
+
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);
   });

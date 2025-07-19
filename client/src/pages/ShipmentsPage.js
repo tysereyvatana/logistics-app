@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import AuthContext from '../context/AuthContext';
@@ -6,8 +6,7 @@ import CreateShipmentModal from '../components/CreateShipmentModal';
 import EditShipmentModal from '../components/EditShipmentModal';
 import ConfirmationModal from '../components/ConfirmationModal';
 import PrintLabelModal from '../components/PrintLabelModal';
-// --- 1. IMPORT THE NEW MODAL ---
-import AddUpdateModal from '../components/AddUpdateModal';
+import { io } from 'socket.io-client';
 
 const ShipmentsPage = () => {
   const [shipments, setShipments] = useState([]);
@@ -15,20 +14,19 @@ const ShipmentsPage = () => {
   const [error, setError] = useState('');
   const { user } = useContext(AuthContext);
 
-  // Your existing modal states
+  const [searchTerm, setSearchTerm] = useState('');
+
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [selectedShipment, setSelectedShipment] = useState(null);
-
-  // --- 2. ADD STATE FOR THE NEW MODAL ---
-  const [isUpdateModalOpen, setUpdateModalOpen] = useState(false);
   
-  const fetchShipments = async () => {
+  const socketRef = useRef(null);
+
+  const fetchShipments = useCallback(async () => {
     if (!user) return;
     try {
-      setLoading(true);
       const response = await api.get('/api/shipments');
       setShipments(response.data);
       setError('');
@@ -38,17 +36,32 @@ const ShipmentsPage = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchShipments();
   }, [user]);
 
-  // Your existing handler functions
+  useEffect(() => {
+    if (user) {
+      fetchShipments();
+
+      socketRef.current = io('http://localhost:5000');
+      socketRef.current.emit('join_shipments_room');
+  
+      const handleUpdate = () => {
+        console.log('Shipments list updated via WebSocket. Refetching...');
+        fetchShipments();
+      };
+
+      socketRef.current.on('shipments_updated', handleUpdate);
+  
+      return () => {
+        socketRef.current.off('shipments_updated', handleUpdate);
+        socketRef.current.disconnect();
+      };
+    }
+  }, [user, fetchShipments]);
+
   const handleCreateShipment = async (newShipmentData) => {
     try {
       await api.post('/api/shipments', newShipmentData);
-      fetchShipments();
       setIsCreateModalOpen(false);
     } catch (err) {
       alert('Failed to create shipment.');
@@ -59,7 +72,6 @@ const ShipmentsPage = () => {
   const handleEditShipment = async (shipmentId, updateData) => {
     try {
       await api.put(`/api/shipments/${shipmentId}`, updateData);
-      fetchShipments();
       setIsEditModalOpen(false);
       setSelectedShipment(null);
     } catch (err) {
@@ -72,7 +84,6 @@ const ShipmentsPage = () => {
     if (!selectedShipment) return;
     try {
       await api.delete(`/api/shipments/${selectedShipment.id}`);
-      setShipments(shipments.filter(s => s.id !== selectedShipment.id));
       setIsDeleteModalOpen(false);
       setSelectedShipment(null);
     } catch (err) {
@@ -96,26 +107,29 @@ const ShipmentsPage = () => {
     setIsPrintModalOpen(true);
   };
 
-  // --- 3. ADD HANDLERS FOR THE NEW MODAL ---
-  const openUpdateModal = (shipment) => {
-    setSelectedShipment(shipment);
-    setUpdateModalOpen(true);
-  };
+  const filteredShipments = shipments.filter(shipment => {
+    const lowercasedTerm = searchTerm.toLowerCase();
+    const numericTerm = searchTerm.replace(/\D/g, '');
 
-  const handleUpdateSuccess = () => {
-    alert('Shipment update added successfully!');
-    // The real-time update will appear on the TrackingPage automatically.
-    // We also re-fetch shipments to update the status in the table.
-    fetchShipments();
-  };
+    if (!searchTerm) return true;
 
+    if (shipment.tracking_number && String(shipment.tracking_number).toLowerCase().includes(lowercasedTerm)) return true;
+    if (shipment.sender_name && String(shipment.sender_name).toLowerCase().includes(lowercasedTerm)) return true;
+    if (shipment.receiver_name && String(shipment.receiver_name).toLowerCase().includes(lowercasedTerm)) return true;
+
+    if (numericTerm) {
+        if (shipment.sender_phone && String(shipment.sender_phone).replace(/\D/g, '').includes(numericTerm)) return true;
+        if (shipment.receiver_phone && String(shipment.receiver_phone).replace(/\D/g, '').includes(numericTerm)) return true;
+    }
+
+    return false;
+  });
 
   if (loading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500"></div></div>;
   if (error) return <div className="text-center mt-10 p-4 bg-red-100 text-red-700 rounded-lg">{error}</div>;
 
   return (
     <>
-      {/* Your existing modals */}
       <CreateShipmentModal 
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
@@ -139,26 +153,34 @@ const ShipmentsPage = () => {
         onClose={() => setIsPrintModalOpen(false)}
         shipment={selectedShipment}
       />
-      {/* --- 4. RENDER THE NEW MODAL --- */}
-      <AddUpdateModal
-        isOpen={isUpdateModalOpen}
-        onClose={() => setUpdateModalOpen(false)}
-        shipmentId={selectedShipment?.id}
-        onUpdateSuccess={handleUpdateSuccess}
-      />
 
       <div className="bg-white rounded-xl shadow-lg p-6 md:p-8">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold text-gray-800">Manage Shipments</h1>
-          <button onClick={() => setIsCreateModalOpen(true)} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white font-semibold rounded-lg">
-            + Create Shipment
-          </button>
+        {/* --- UPDATED HEADER LAYOUT --- */}
+        <div className="mb-6">
+          <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-4">
+            <h1 className="text-3xl font-bold text-gray-800 self-start md:self-center">Manage Shipments</h1>
+            <button onClick={() => setIsCreateModalOpen(true)} className="w-full md:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 text-white font-semibold rounded-lg">
+              + Create Shipment
+            </button>
+          </div>
+          <div className="w-full md:w-1/2 lg:w-1/3">
+            <input
+              type="text"
+              placeholder="Search by Tracking #, Name, or Phone..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tracking #</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sender Info</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Receiver Info</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">From</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Destination To</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
@@ -168,10 +190,23 @@ const ShipmentsPage = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {shipments.length > 0 ? (
-                shipments.map((shipment) => (
+              {filteredShipments.length > 0 ? (
+                filteredShipments.map((shipment) => (
                   <tr key={shipment.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">{shipment.tracking_number}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">
+                      <Link to={`/track/${shipment.tracking_number}`} className="hover:underline">
+                        {shipment.tracking_number}
+                      </Link>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{new Date(shipment.created_at).toLocaleDateString()}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      <div>{shipment.sender_name}</div>
+                      <div className="text-xs text-gray-500">{shipment.sender_phone}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      <div>{shipment.receiver_name}</div>
+                      <div className="text-xs text-gray-500">{shipment.receiver_phone}</div>
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{shipment.origin_branch_name}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{shipment.destination_branch_name}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -193,8 +228,6 @@ const ShipmentsPage = () => {
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-4">
-                      {/* --- 5. ADD THE NEW BUTTON TO YOUR ACTIONS --- */}
-                      <button onClick={() => openUpdateModal(shipment)} className="text-purple-600 hover:text-purple-900">Update</button>
                       <button onClick={() => openEditModal(shipment)} className="text-indigo-600 hover:text-indigo-900">Edit</button>
                       <Link to={`/invoice/${shipment.id}`} className="text-green-600 hover:text-green-900">Invoice</Link>
                       <button onClick={() => openPrintModal(shipment)} className="text-gray-600 hover:text-gray-900">Print</button>
@@ -206,8 +239,8 @@ const ShipmentsPage = () => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="7" className="px-6 py-10 text-center text-gray-500">
-                    No shipments found.
+                  <td colSpan="10" className="px-6 py-10 text-center text-gray-500">
+                    No shipments found matching your search.
                   </td>
                 </tr>
               )}
