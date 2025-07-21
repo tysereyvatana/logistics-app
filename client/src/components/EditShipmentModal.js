@@ -1,19 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import Modal from './Modal';
 import api from '../services/api';
+import toast from 'react-hot-toast';
 
 const EditShipmentModal = ({ isOpen, onClose, shipment, onShipmentUpdated }) => {
   const [formData, setFormData] = useState({});
   const [branches, setBranches] = useState([]);
   const [rates, setRates] = useState([]);
   
-  // State for the text inputs
   const [originSearch, setOriginSearch] = useState('');
   const [destinationSearch, setDestinationSearch] = useState('');
   const [showOriginSuggestions, setShowOriginSuggestions] = useState(false);
   const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false);
 
-  // State for the optional status update
   const [location, setLocation] = useState('');
   const [statusUpdateMessage, setStatusUpdateMessage] = useState('');
 
@@ -56,6 +55,30 @@ const EditShipmentModal = ({ isOpen, onClose, shipment, onShipmentUpdated }) => 
     setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
   };
 
+  const handleOriginSearchChange = (e) => {
+    const value = e.target.value;
+    setOriginSearch(value);
+    setShowOriginSuggestions(true);
+    const match = branches.find(b => b.branch_name.toLowerCase() === value.toLowerCase());
+    if (match) {
+      setFormData(prev => ({ ...prev, origin_branch_id: match.id }));
+    } else {
+      setFormData(prev => ({ ...prev, origin_branch_id: '' }));
+    }
+  };
+
+  const handleDestinationSearchChange = (e) => {
+    const value = e.target.value;
+    setDestinationSearch(value);
+    setShowDestinationSuggestions(true);
+    const match = branches.find(b => b.branch_name.toLowerCase() === value.toLowerCase());
+    if (match) {
+      setFormData(prev => ({ ...prev, destination_branch_id: match.id }));
+    } else {
+      setFormData(prev => ({ ...prev, destination_branch_id: '' }));
+    }
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     const finalData = { ...formData };
@@ -88,7 +111,7 @@ const EditShipmentModal = ({ isOpen, onClose, shipment, onShipmentUpdated }) => 
                     <input
                       type="text"
                       value={originSearch}
-                      onChange={(e) => { setOriginSearch(e.target.value); setShowOriginSuggestions(true); }}
+                      onChange={handleOriginSearchChange}
                       onFocus={() => setShowOriginSuggestions(true)}
                       onBlur={() => setTimeout(() => setShowOriginSuggestions(false), 150)}
                       placeholder="Search for origin..."
@@ -113,7 +136,7 @@ const EditShipmentModal = ({ isOpen, onClose, shipment, onShipmentUpdated }) => 
                     <input
                       type="text"
                       value={destinationSearch}
-                      onChange={(e) => { setDestinationSearch(e.target.value); setShowDestinationSuggestions(true); }}
+                      onChange={handleDestinationSearchChange}
                       onFocus={() => setShowDestinationSuggestions(true)}
                       onBlur={() => setTimeout(() => setShowDestinationSuggestions(false), 150)}
                       placeholder="Search for destination..."
@@ -175,6 +198,24 @@ const EditShipmentModal = ({ isOpen, onClose, shipment, onShipmentUpdated }) => 
                 </div>
               </div>
             </fieldset>
+            {/* --- NEW: Receiver Information Fieldset --- */}
+            <fieldset>
+              <legend className="text-lg font-medium text-gray-900 mb-2">Receiver Information</legend>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Receiver Name</label>
+                  <input name="receiver_name" value={formData.receiver_name || ''} onChange={handleChange} className="w-full px-3 py-2 border rounded-lg" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Receiver Phone</label>
+                  <input name="receiver_phone" value={formData.receiver_phone || ''} onChange={handleChange} className="w-full px-3 py-2 border rounded-lg" />
+                </div>
+              </div>
+            </fieldset>
+          </div>
+
+          {/* Right Column */}
+          <div className="space-y-6">
             <fieldset>
               <legend className="text-lg font-medium text-gray-900 mb-2">Payment</legend>
                 <div className="flex items-center">
@@ -188,10 +229,6 @@ const EditShipmentModal = ({ isOpen, onClose, shipment, onShipmentUpdated }) => 
                     </div>
                 )}
             </fieldset>
-          </div>
-
-          {/* Right Column */}
-          <div className="space-y-6">
             <fieldset>
               <legend className="text-lg font-medium text-gray-900 mb-2">Add New Status Update <span className="text-sm font-normal text-gray-500">(Optional)</span></legend>
               <div className="space-y-4">

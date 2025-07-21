@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Modal from './Modal';
 import api from '../services/api';
+import toast from 'react-hot-toast';
 
 const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
   const [formData, setFormData] = useState({
@@ -18,24 +19,33 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
     cod_amount: ''
   });
 
-  // State for the raw data lists
   const [clients, setClients] = useState([]);
   const [branches, setBranches] = useState([]);
   const [rates, setRates] = useState([]);
   const [error, setError] = useState('');
 
-  // State for the searchable input fields
   const [clientSearch, setClientSearch] = useState('');
   const [originSearch, setOriginSearch] = useState('');
   const [destinationSearch, setDestinationSearch] = useState('');
 
-  // State to control visibility of the suggestion dropdowns
   const [showClientSuggestions, setShowClientSuggestions] = useState(false);
   const [showOriginSuggestions, setShowOriginSuggestions] = useState(false);
   const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
+      // 1. Reset the form state completely when the modal opens.
+      setFormData({
+        clientId: '', origin_branch_id: '', destination_branch_id: '',
+        estimated_delivery: '', weight_kg: '', service_type: '',
+        sender_name: '', sender_phone: '', receiver_name: '', receiver_phone: '',
+        is_cod: false, cod_amount: ''
+      });
+      setClientSearch('');
+      setOriginSearch('');
+      setDestinationSearch('');
+      setError('');
+
       const fetchData = async () => {
         try {
           const [clientsResponse, branchesResponse, ratesResponse] = await Promise.all([
@@ -47,26 +57,17 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
           setBranches(branchesResponse.data);
           setRates(ratesResponse.data);
 
-          if (ratesResponse.data.length > 0) {
+          // 2. AFTER fetching, set the default service type.
+          if (ratesResponse.data && ratesResponse.data.length > 0) {
             setFormData(prev => ({ ...prev, service_type: ratesResponse.data[0].service_name }));
           }
+
         } catch (err) {
           console.error("Failed to fetch data", err);
           setError("Could not load required data.");
         }
       };
       fetchData();
-      // Reset form on open
-      setFormData({
-        clientId: '', origin_branch_id: '', destination_branch_id: '',
-        estimated_delivery: '', weight_kg: '', service_type: '',
-        sender_name: '', sender_phone: '', receiver_name: '', receiver_phone: '',
-        is_cod: false, cod_amount: ''
-      });
-      setClientSearch('');
-      setOriginSearch('');
-      setDestinationSearch('');
-      setError('');
     }
   }, [isOpen]);
 
@@ -75,8 +76,54 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
     setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
   };
 
+  // --- UPDATED SEARCH HANDLERS ---
+  const handleClientSearchChange = (e) => {
+    const value = e.target.value;
+    setClientSearch(value);
+    setShowClientSuggestions(true);
+    // Clear the ID if the text doesn't match a valid option
+    const match = clients.find(c => c.full_name.toLowerCase() === value.toLowerCase());
+    if (!match) {
+      setFormData(prev => ({ ...prev, clientId: '' }));
+    }
+  };
+
+  const handleOriginSearchChange = (e) => {
+    const value = e.target.value;
+    setOriginSearch(value);
+    setShowOriginSuggestions(true);
+    const match = branches.find(b => b.branch_name.toLowerCase() === value.toLowerCase());
+    if (!match) {
+      setFormData(prev => ({ ...prev, origin_branch_id: '' }));
+    }
+  };
+
+  const handleDestinationSearchChange = (e) => {
+    const value = e.target.value;
+    setDestinationSearch(value);
+    setShowDestinationSuggestions(true);
+    const match = branches.find(b => b.branch_name.toLowerCase() === value.toLowerCase());
+    if (!match) {
+      setFormData(prev => ({ ...prev, destination_branch_id: '' }));
+    }
+  };
+
+
   const handleSubmit = (e) => {
     e.preventDefault();
+    // --- ROBUST VALIDATION ---
+    if (!formData.clientId) {
+        toast.error("Please select a valid client from the list.");
+        return;
+    }
+    if (!formData.origin_branch_id) {
+        toast.error("Please select a valid origin branch from the list.");
+        return;
+    }
+    if (!formData.destination_branch_id) {
+        toast.error("Please select a valid destination branch from the list.");
+        return;
+    }
     const { clientId, ...rest } = formData;
     const newShipmentData = {
       ...rest,
@@ -86,7 +133,6 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
     onShipmentCreated(newShipmentData);
   };
 
-  // Filter functions for the searchable inputs
   const filteredClients = clientSearch
     ? clients.filter(c => c.full_name.toLowerCase().includes(clientSearch.toLowerCase()))
     : clients;
@@ -101,23 +147,20 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
         {error && <p className="p-3 bg-red-100 text-red-700 rounded-lg mb-4">{error}</p>}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-8 gap-y-6">
           
-          {/* Left Column */}
           <div className="space-y-6">
             <fieldset>
               <legend className="text-lg font-medium text-gray-900 mb-2">Client & Route</legend>
               <div className="space-y-4">
-                {/* Searchable Client Dropdown */}
                 <div className="relative">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Assign to Client</label>
                   <input
                     type="text"
                     value={clientSearch}
-                    onChange={(e) => { setClientSearch(e.target.value); setShowClientSuggestions(true); }}
+                    onChange={handleClientSearchChange}
                     onFocus={() => setShowClientSuggestions(true)}
                     onBlur={() => setTimeout(() => setShowClientSuggestions(false), 150)}
                     placeholder="Search for a client..."
                     className="w-full px-3 py-2 border rounded-lg bg-white"
-                    required
                   />
                   {showClientSuggestions && (
                     <ul className="absolute z-20 w-full bg-white border rounded-lg mt-1 max-h-40 overflow-y-auto shadow-lg">
@@ -133,18 +176,16 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
                     </ul>
                   )}
                 </div>
-                {/* Searchable Origin Branch Dropdown */}
                 <div className="relative">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Origin Branch</label>
                   <input
                     type="text"
                     value={originSearch}
-                    onChange={(e) => { setOriginSearch(e.target.value); setShowOriginSuggestions(true); }}
+                    onChange={handleOriginSearchChange}
                     onFocus={() => setShowOriginSuggestions(true)}
                     onBlur={() => setTimeout(() => setShowOriginSuggestions(false), 150)}
                     placeholder="Search for an origin branch..."
                     className="w-full px-3 py-2 border rounded-lg bg-white"
-                    required
                   />
                   {showOriginSuggestions && (
                     <ul className="absolute z-10 w-full bg-white border rounded-lg mt-1 max-h-40 overflow-y-auto shadow-lg">
@@ -160,18 +201,16 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
                     </ul>
                   )}
                 </div>
-                {/* Searchable Destination Branch Dropdown */}
                 <div className="relative">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Destination Branch</label>
                   <input
                     type="text"
                     value={destinationSearch}
-                    onChange={(e) => { setDestinationSearch(e.target.value); setShowDestinationSuggestions(true); }}
+                    onChange={handleDestinationSearchChange}
                     onFocus={() => setShowDestinationSuggestions(true)}
                     onBlur={() => setTimeout(() => setShowDestinationSuggestions(false), 150)}
                     placeholder="Search for a destination branch..."
                     className="w-full px-3 py-2 border rounded-lg bg-white"
-                    required
                   />
                   {showDestinationSuggestions && (
                      <ul className="absolute z-10 w-full bg-white border rounded-lg mt-1 max-h-40 overflow-y-auto shadow-lg">
@@ -191,7 +230,6 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
             </fieldset>
           </div>
 
-          {/* Center Column */}
           <div className="space-y-6">
             <fieldset>
               <legend className="text-lg font-medium text-gray-900 mb-2">Contact Information</legend>
@@ -216,7 +254,6 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
             </fieldset>
           </div>
 
-          {/* Right Column */}
           <div className="space-y-6">
             <fieldset>
               <legend className="text-lg font-medium text-gray-900 mb-2">Shipment Details</legend>
@@ -227,7 +264,8 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Service</label>
-                  <select name="service_type" value={formData.service_type} onChange={handleChange} className="w-full px-3 py-2 border rounded-lg bg-white">
+                  <select name="service_type" value={formData.service_type} onChange={handleChange} className="w-full px-3 py-2 border rounded-lg bg-white" required>
+                    <option value="" disabled>-- Select a Service --</option>
                     {rates.map(rate => (
                       <option key={rate.id} value={rate.service_name}>
                         {rate.service_name.charAt(0).toUpperCase() + rate.service_name.slice(1)}
@@ -258,7 +296,6 @@ const CreateShipmentModal = ({ isOpen, onClose, onShipmentCreated }) => {
           </div>
         </div>
         
-        {/* Buttons */}
         <div className="flex justify-end mt-8 border-t pt-4">
           <button type="button" onClick={onClose} className="mr-3 px-6 py-2.5 bg-gray-200 text-gray-800 font-semibold rounded-lg hover:bg-gray-300">Cancel</button>
           <button type="submit" className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700">Create Shipment</button>

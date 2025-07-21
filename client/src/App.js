@@ -16,6 +16,7 @@ import InvoicePage from './pages/InvoicePage';
 import ReportsPage from './pages/ReportsPage';
 import AlertModal from './components/AlertModal';
 
+// This component consumes the context and renders the main app layout.
 const AppContent = () => {
   const { alertInfo, closeAlert } = useContext(AuthContext);
 
@@ -32,8 +33,6 @@ const AppContent = () => {
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<TrackingPage />} />
-          {/* --- FIX IS HERE --- */}
-          {/* The route now accepts a tracking number parameter */}
           <Route path="/track/:trackingNumber" element={<TrackingPage />} />
           <Route path="/track" element={<TrackingPage />} />
           <Route path="/login" element={<LoginPage />} />
@@ -61,6 +60,7 @@ const AppContent = () => {
   );
 }
 
+// The main App component wraps everything in the AuthProvider.
 function App() {
   return (
     <AuthProvider>

@@ -1,6 +1,6 @@
 // -------------------------------------------------------------------
 // FILE: routes/shipments.js
-// DESCRIPTION: Updated GET routes to include full branch addresses.
+// DESCRIPTION: Complete and final version with all routes and features restored.
 // -------------------------------------------------------------------
 const express = require('express');
 const router = express.Router();
@@ -20,30 +20,61 @@ const generateTrackingNumber = () => `TK${Math.floor(1000000000 + Math.random() 
 
 // --- GET Routes ---
 
-// GET all shipments (for admin/staff)
+// GET all shipments with pagination and search
 router.get('/', protect, authorize('admin', 'staff'), async (req, res) => {
     try {
-        const query = `
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const searchTerm = req.query.searchTerm || '';
+        const offset = (page - 1) * limit;
+
+        let whereClause = '';
+        const queryParams = [];
+        
+        if (searchTerm) {
+            queryParams.push(`%${searchTerm}%`);
+            const searchConditions = [
+                `s.tracking_number ILIKE $${queryParams.length}`,
+                `s.sender_name ILIKE $${queryParams.length}`,
+                `s.receiver_name ILIKE $${queryParams.length}`,
+                `s.sender_phone ILIKE $${queryParams.length}`,
+                `s.receiver_phone ILIKE $${queryParams.length}`
+            ];
+            whereClause = `WHERE ${searchConditions.join(' OR ')}`;
+        }
+        
+        const totalQuery = `SELECT COUNT(*) FROM shipments s ${whereClause}`;
+        const totalResult = await pool.query(totalQuery, queryParams);
+        const totalCount = parseInt(totalResult.rows[0].count, 10);
+
+        const dataQuery = `
             SELECT 
                 s.*, 
                 origin.branch_name as origin_branch_name,
-                origin.branch_address as origin_branch_address,
-                dest.branch_name as destination_branch_name,
-                dest.branch_address as destination_branch_address
+                dest.branch_name as destination_branch_name
             FROM shipments s
             LEFT JOIN branches origin ON s.origin_branch_id = origin.id
             LEFT JOIN branches dest ON s.destination_branch_id = dest.id
+            ${whereClause}
             ORDER BY s.created_at DESC
+            LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
         `;
-        const shipments = await pool.query(query);
-        res.json(shipments.rows);
+        
+        const shipmentsResult = await pool.query(dataQuery, [...queryParams, limit, offset]);
+        
+        res.json({
+            shipments: shipmentsResult.rows,
+            totalCount,
+            totalPages: Math.ceil(totalCount / limit)
+        });
+
     } catch (err) {
-        console.error(err.message);
+        console.error("Error fetching shipments:", err.message);
         res.status(500).send('Server Error');
     }
 });
 
-// GET dashboard stats
+// GET dashboard stats for admins
 router.get('/stats', protect, authorize('admin', 'staff'), async (req, res) => {
     try {
         const statsQuery = `
@@ -65,7 +96,7 @@ router.get('/stats', protect, authorize('admin', 'staff'), async (req, res) => {
         };
         res.json(stats);
     } catch (err) {
-        console.error(err.message);
+        console.error("Error fetching stats:", err.message);
         res.status(500).send('Server Error');
     }
 });
@@ -94,11 +125,10 @@ router.get('/my-stats', protect, async (req, res) => {
         };
         res.json(stats);
     } catch (err) {
-        console.error(err.message);
+        console.error("Error fetching my-stats:", err.message);
         res.status(500).send('Server Error');
     }
 });
-
 
 // GET recent activity
 router.get('/recent-activity', protect, authorize('admin', 'staff'), async (req, res) => {
@@ -111,7 +141,7 @@ router.get('/recent-activity', protect, authorize('admin', 'staff'), async (req,
         const result = await pool.query(activityQuery);
         res.json(result.rows);
     } catch (err) {
-        console.error(err.message);
+        console.error("Error fetching recent-activity:", err.message);
         res.status(500).send('Server Error');
     }
 });
@@ -136,7 +166,7 @@ router.get('/my-shipments', protect, async (req, res) => {
         const shipments = await pool.query(query, [clientId]);
         res.json(shipments.rows);
     } catch (err) {
-        console.error(err.message);
+        console.error("Error fetching my-shipments:", err.message);
         res.status(500).send('Server Error');
     }
 });
@@ -167,7 +197,7 @@ router.get('/track/:trackingNumber', async (req, res) => {
         );
         res.json({ shipment, history: updatesResult.rows });
     } catch (err) {
-        console.error(err.message);
+        console.error("Error fetching track/:trackingNumber:", err.message);
         res.status(500).send('Server Error');
     }
 });
@@ -204,12 +234,12 @@ router.get('/:id', protect, async (req, res) => {
         }
 
     } catch (err) {
-        console.error(err.message);
+        console.error("Error fetching /:id:", err.message);
         res.status(500).send('Server Error');
     }
 });
 
-// --- POST Route ---
+// --- POST Route with Transaction ---
 router.post('/', protect, authorize('admin', 'staff'), async (req, res) => {
     const { 
         client_id, origin_branch_id, destination_branch_id, estimated_delivery, 
@@ -221,11 +251,16 @@ router.post('/', protect, authorize('admin', 'staff'), async (req, res) => {
     if (!origin_branch_id || !destination_branch_id) { return res.status(400).json({ msg: 'Origin and destination branches are required.' }); }
     if (!client_id || !weight_kg || !service_type || !sender_name || !receiver_name) { return res.status(400).json({ msg: 'Please fill out all required fields.' }); }
 
-    const price = await calculatePrice(weight_kg, service_type);
-    const tracking_number = generateTrackingNumber();
-    const status = 'pending';
+    const client = await pool.connect();
+
     try {
-        const newShipment = await pool.query(
+        await client.query('BEGIN');
+
+        const price = await calculatePrice(weight_kg, service_type);
+        const tracking_number = generateTrackingNumber();
+        const status = 'pending';
+
+        const newShipmentResult = await client.query(
             `INSERT INTO shipments (
                 tracking_number, client_id, estimated_delivery, weight_kg, service_type, price,
                 sender_name, sender_phone, receiver_name, receiver_phone,
@@ -237,24 +272,32 @@ router.post('/', protect, authorize('admin', 'staff'), async (req, res) => {
                 is_cod || false, cod_amount || 0, origin_branch_id, destination_branch_id, status
             ]
         );
-        const shipment = newShipment.rows[0];
-        
-        const originBranch = await pool.query('SELECT branch_address FROM branches WHERE id = $1', [origin_branch_id]);
-        const initialLocation = originBranch.rows.length > 0 ? originBranch.rows[0].branch_address : 'Origin Facility';
+        const shipment = newShipmentResult.rows[0];
 
-        await pool.query(
+        if (!shipment) {
+            throw new Error("Shipment creation failed, no row returned from database.");
+        }
+        
+        const originBranchResult = await client.query('SELECT branch_address FROM branches WHERE id = $1', [origin_branch_id]);
+        const initialLocation = originBranchResult.rows.length > 0 ? originBranchResult.rows[0].branch_address : 'Origin Facility';
+
+        await client.query(
             'INSERT INTO shipment_updates (shipment_id, location, status_update) VALUES ($1, $2, $3)',
             [shipment.id, initialLocation, 'Shipment created and pending pickup.']
         );
 
-        // --- REAL-TIME UPDATES ---
+        await client.query('COMMIT');
+
         req.io.to('shipments_room').emit('shipments_updated');
         req.io.to(`client_${client_id}`).emit('client_shipments_updated');
         
         res.status(201).json(shipment);
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
+        await client.query('ROLLBACK');
+        console.error("DATABASE ERROR ON SHIPMENT CREATION:", err);
+        res.status(500).json({ msg: 'Server error: Could not create shipment.' });
+    } finally {
+        client.release();
     }
 });
 
@@ -273,20 +316,34 @@ router.put('/:id', protect, authorize('admin', 'staff'), async (req, res) => {
         }
         const currentShipment = currentShipmentResult.rows[0];
 
-        if (shipmentData.weight_kg !== undefined || shipmentData.service_type !== undefined) {
-            const newWeight = shipmentData.weight_kg !== undefined ? shipmentData.weight_kg : currentShipment.weight_kg;
-            const newService = shipmentData.service_type !== undefined ? shipmentData.service_type : currentShipment.service_type;
-            shipmentData.price = await calculatePrice(newWeight, newService);
+        const validColumns = [
+            'client_id', 'origin_branch_id', 'destination_branch_id', 'status', 
+            'estimated_delivery', 'weight_kg', 'service_type', 'price',
+            'sender_name', 'sender_phone', 'receiver_name', 'receiver_phone',
+            'is_cod', 'cod_amount'
+        ];
+
+        const dataToUpdate = {};
+        for (const key in shipmentData) {
+            if (validColumns.includes(key)) {
+                dataToUpdate[key] = shipmentData[key];
+            }
         }
 
-        const updateFields = Object.keys(shipmentData);
+        if (dataToUpdate.weight_kg !== undefined || dataToUpdate.service_type !== undefined) {
+            const newWeight = dataToUpdate.weight_kg !== undefined ? dataToUpdate.weight_kg : currentShipment.weight_kg;
+            const newService = dataToUpdate.service_type !== undefined ? dataToUpdate.service_type : currentShipment.service_type;
+            dataToUpdate.price = await calculatePrice(newWeight, newService);
+        }
+
+        const updateFields = Object.keys(dataToUpdate);
         let updatedShipment = currentShipment;
 
         if (updateFields.length > 0) {
             const setClause = updateFields
                 .map((key, index) => `"${key}" = $${index + 1}`)
                 .join(', ');
-            const queryParams = [...Object.values(shipmentData), id];
+            const queryParams = [...Object.values(dataToUpdate), id];
             
             const queryText = `UPDATE shipments SET ${setClause} WHERE id = $${queryParams.length} RETURNING *`;
             
@@ -320,7 +377,6 @@ router.put('/:id', protect, authorize('admin', 'staff'), async (req, res) => {
             history: historyResult.rows
         };
         
-        // --- REAL-TIME UPDATES ---
         req.io.to(fullShipment.tracking_number).emit('shipmentUpdated', fullUpdatePayload);
         req.io.to('shipments_room').emit('shipments_updated');
         req.io.to(`client_${fullShipment.client_id}`).emit('client_shipments_updated');
@@ -328,7 +384,7 @@ router.put('/:id', protect, authorize('admin', 'staff'), async (req, res) => {
         res.json(updatedShipment);
 
     } catch (err) {
-        console.error(err.message);
+        console.error("Error updating shipment:", err);
         res.status(500).send('Server Error');
     }
 });
@@ -349,7 +405,6 @@ router.delete('/:id', protect, authorize('admin'), async (req, res) => {
             return res.status(404).json({ msg: 'Shipment not found during delete operation' });
         }
         
-        // --- REAL-TIME UPDATES ---
         req.io.to('shipments_room').emit('shipments_updated');
         if (clientId) {
             req.io.to(`client_${clientId}`).emit('client_shipments_updated');

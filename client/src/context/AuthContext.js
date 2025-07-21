@@ -11,9 +11,8 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   
-  // --- NEW: State for the custom alert modal ---
+  // --- State for the custom alert modal ---
   const [alertInfo, setAlertInfo] = useState({ isOpen: false, message: '' });
-
   const isLoggingOut = useRef(false);
 
   // Function to show the custom alert
@@ -24,6 +23,8 @@ export const AuthProvider = ({ children }) => {
   // Function to close the custom alert
   const closeAlert = () => {
     setAlertInfo({ isOpen: false, message: '' });
+    // If the user was logged out, the logout function will handle navigation.
+    // This just closes the modal visually.
   };
 
   const logout = useCallback(() => {
@@ -70,7 +71,7 @@ export const AuthProvider = ({ children }) => {
           socket = io('http://localhost:5000');
           socket.emit('join_session_room', `session_${sessionId}`);
           socket.on('force_logout', (data) => {
-            showAlert(data.msg); // Use custom alert
+            showAlert(data.msg);
             logout();
           });
         }
@@ -85,7 +86,7 @@ export const AuthProvider = ({ children }) => {
       (error) => {
         if (error.response && error.response.status === 401) {
           const message = error.response.data.msg || "Your session has expired. Please log in again.";
-          showAlert(message); // Use custom alert
+          showAlert(message);
           logout();
         }
         return Promise.reject(error);

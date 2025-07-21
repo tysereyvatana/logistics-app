@@ -37,28 +37,31 @@ const UserManagementPage = () => {
     const socket = socketRef.current;
 
     socket.on('connect', () => {
-      console.log('[UserManagementPage] Socket connected, joining users_room...');
       socket.emit('join_users_room');
     });
 
     const handleUpdate = () => {
-      console.log('[UserManagementPage] Received users_updated event. Refetching data...');
       fetchUsers();
     };
 
     socket.on('users_updated', handleUpdate);
 
     return () => {
-      console.log('[UserManagementPage] Disconnecting socket.');
       socket.off('users_updated', handleUpdate);
       socket.disconnect();
     };
   }, [fetchUsers]);
 
+  const handleUserAdded = () => {
+    setIsAddModalOpen(false);
+    fetchUsers(); // Manually refetch for instant feedback
+  };
+
   const handleUpdateUserRole = async (userId, data) => {
     try {
       await api.put(`/api/users/${userId}/role`, data);
       setUserToEdit(null);
+      fetchUsers(); // Manually refetch for instant feedback
     } catch (err) {
       alert(err.response?.data?.msg || 'Failed to update user role.');
       console.error(err);
@@ -70,6 +73,7 @@ const UserManagementPage = () => {
     try {
       await api.delete(`/api/users/${userToDelete.id}`);
       setUserToDelete(null);
+      fetchUsers(); // Manually refetch for instant feedback
     } catch (err) {
       alert(err.response?.data?.msg || 'Failed to delete user.');
       console.error(err);
@@ -94,7 +98,7 @@ const UserManagementPage = () => {
       <AddUserModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        onUserAdded={() => setIsAddModalOpen(false)} // Just close the modal, websocket will refresh
+        onUserAdded={handleUserAdded}
       />
       <EditUserRoleModal
         isOpen={!!userToEdit}
