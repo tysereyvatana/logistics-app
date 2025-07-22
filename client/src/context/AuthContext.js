@@ -1,6 +1,6 @@
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
+import api, { getMe, logoutUser } from '../services/api';
 import { io } from 'socket.io-client';
 import { jwtDecode } from 'jwt-decode';
 
@@ -11,20 +11,16 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   
-  // --- State for the custom alert modal ---
   const [alertInfo, setAlertInfo] = useState({ isOpen: false, message: '' });
   const isLoggingOut = useRef(false);
+  const socketRef = useRef(null);
 
-  // Function to show the custom alert
   const showAlert = (message) => {
     setAlertInfo({ isOpen: true, message });
   };
 
-  // Function to close the custom alert
   const closeAlert = () => {
     setAlertInfo({ isOpen: false, message: '' });
-    // If the user was logged out, the logout function will handle navigation.
-    // This just closes the modal visually.
   };
 
   const logout = useCallback(() => {
@@ -32,59 +28,64 @@ export const AuthProvider = ({ children }) => {
     isLoggingOut.current = true;
 
     const performLogout = async () => {
-      const token = localStorage.getItem('token');
-      if (token) {
-        try {
-          await api.post('/api/auth/logout');
-        } catch (error) {
-          console.error("Server logout call failed:", error);
-        }
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
       }
-
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      setUser(null);
-      delete api.defaults.headers.common['Authorization'];
-      
-      navigate('/login');
-      setTimeout(() => {
-        isLoggingOut.current = false;
-      }, 1000);
+      try {
+        await logoutUser();
+      } catch (error) {
+        console.error("Server logout call failed:", error);
+      } finally {
+        localStorage.removeItem('token');
+        setUser(null);
+        delete api.defaults.headers.common['Authorization'];
+        navigate('/login');
+        setTimeout(() => {
+          isLoggingOut.current = false;
+        }, 500);
+      }
     };
     performLogout();
   }, [navigate]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
-    let socket;
 
-    if (token && storedUser) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      setUser(JSON.parse(storedUser));
+    const initializeAuth = async () => {
+      if (token) {
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        try {
+          const { data: userData } = await getMe();
+          setUser(userData);
 
-      try {
-        const decodedToken = jwtDecode(token);
-        const sessionId = decodedToken?.user?.sessionId;
+          const decodedToken = jwtDecode(token);
+          const sessionId = decodedToken?.user?.sessionId;
 
-        if (sessionId) {
-          socket = io('http://localhost:5000');
-          socket.emit('join_session_room', `session_${sessionId}`);
-          socket.on('force_logout', (data) => {
-            showAlert(data.msg);
-            logout();
-          });
+          if (sessionId && !socketRef.current) {
+            const socket = io('http://localhost:5000');
+            socketRef.current = socket;
+            socket.emit('join_session_room', `session_${sessionId}`);
+            socket.on('force_logout', (data) => {
+              showAlert(data.msg);
+              logout();
+            });
+          }
+        } catch (error) {
+          console.error("Authentication failed:", error);
+          localStorage.removeItem('token');
+          delete api.defaults.headers.common['Authorization'];
         }
-      } catch (error) {
-        showAlert("Invalid session token. Please log in again.");
-        logout();
       }
-    }
+      setLoading(false);
+    };
+
+    initializeAuth();
 
     const responseInterceptor = api.interceptors.response.use(
       (response) => response,
       (error) => {
-        if (error.response && error.response.status === 401) {
+        if (error.response && error.response.status === 401 && !isLoggingOut.current) {
           const message = error.response.data.msg || "Your session has expired. Please log in again.";
           showAlert(message);
           logout();
@@ -93,23 +94,22 @@ export const AuthProvider = ({ children }) => {
       }
     );
 
-    setLoading(false);
-
     return () => {
       api.interceptors.response.eject(responseInterceptor);
-      if (socket) {
-        socket.disconnect();
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
       }
     };
   }, [logout]);
 
   const login = async (email, password) => {
     try {
-      const response = await api.post('/api/auth/login', { email, password });
-      const { token, user: loggedInUser } = response.data;
+      const { data: { token } } = await loginUser({ email, password });
       localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify(loggedInUser));
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
+      const { data: loggedInUser } = await getMe();
       setUser(loggedInUser);
 
       if (loggedInUser.role === 'admin' || loggedInUser.role === 'staff') {

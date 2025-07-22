@@ -29,10 +29,8 @@ const PORT = process.env.PORT || 5000;
 app.use(cors()); 
 app.use(express.json()); 
 
-app.use((req, res, next) => {
-  req.io = io;
-  next();
-});
+// Make io accessible to our routes
+app.set('socketio', io);
 
 // --- API Routes ---
 app.use('/api/auth', authRoutes);
@@ -42,6 +40,13 @@ app.use('/api/rates', rateRoutes);
 app.use('/api/branches', branchRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/updates', updateRoutes);
+
+// --- Global Error Handling Middleware ---
+// This should be the last middleware you add
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ message: 'Something went wrong on the server!' });
+});
 
 // --- Socket.IO Connection Handling ---
 io.on('connection', (socket) => {
@@ -67,7 +72,6 @@ io.on('connection', (socket) => {
     console.log(`User ${socket.id} joined the rates management room.`);
   });
 
-  // --- NEW: For real-time updates on the BranchManagementPage ---
   socket.on('join_branches_room', () => {
     socket.join('branches_room');
     console.log(`User ${socket.id} joined the branches management room.`);
